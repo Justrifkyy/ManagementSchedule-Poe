@@ -5,7 +5,8 @@ const amqp = require("amqplib");
 const { sendScheduleNotification } = require("./services/emailService");
 const { sendWhatsAppNotification } = require("./services/whatsappService");
 
-const RABBITMQ_URL = process.env.RBITMQ_URL;
+// Pastikan nama variabel .env Anda benar (RABBITMQ_URL)
+const RABBITMQ_URL = process.env.RABBITMQ_URL;
 
 async function startListener() {
   console.log("Notification service starting...");
@@ -21,19 +22,25 @@ async function startListener() {
     channel.consume(queue, async (msg) => {
       if (msg !== null) {
         const messageContent = msg.content.toString();
-        console.log(`[x] Received message: ${messageContent}`);
+        console.log(`[x] Received targeted message: ${messageContent}`);
 
-        const scheduleData = JSON.parse(messageContent);
+        // Logika baru: parsing data notifikasi yang ditargetkan
+        const notificationData = JSON.parse(messageContent);
 
-        // Nomor tujuan untuk tes WhatsApp (hardcode)
-        // PENTING: Ganti dengan nomor WhatsApp Anda yang sudah terverifikasi di Meta
-        const recipientPhoneNumber = "6289518804219"; // Ganti jika perlu
+        // Ambil data spesifik dari pesan
+        const targetEmail = notificationData.recipientEmail;
+        const targetPhone = notificationData.recipientPhone;
+        const scheduleDetails = {
+          title: notificationData.scheduleTitle,
+          scheduleTime: notificationData.scheduleTime,
+        };
 
-        console.log("--> Sending email notification...");
-        await sendScheduleNotification(scheduleData);
+        // Kirim notifikasi HANYA ke target yang ditentukan
+        console.log(`--> Sending email notification to ${targetEmail}...`);
+        await sendScheduleNotification(targetEmail, scheduleDetails);
 
-        console.log("--> Sending WhatsApp notification...");
-        await sendWhatsAppNotification(recipientPhoneNumber, scheduleData);
+        console.log(`--> Sending WhatsApp notification to ${targetPhone}...`);
+        await sendWhatsAppNotification(targetPhone, scheduleDetails);
 
         channel.ack(msg); // Konfirmasi bahwa pesan sudah diproses
       }

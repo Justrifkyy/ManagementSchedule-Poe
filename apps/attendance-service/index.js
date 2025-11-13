@@ -5,6 +5,7 @@ const cors = require("cors");
 const db = require("./config/db");
 const authenticateToken = require("./middleware/authenticateToken");
 const checkAdmin = require("./middleware/checkAdmin");
+const amqp = require("amqplib");
 
 const app = express();
 const PORT = process.env.PORT || 3003;
@@ -121,6 +122,66 @@ app.get("/attendances/my-schedules", authenticateToken, async (req, res) => {
   } catch (error) {
     console.error("Get my schedules error:", error);
     res.status(500).json({ message: "Internal server error." });
+  }
+});
+
+// =======================================================
+// ## ENDPOINT BARU: MENGUNDANG USER KE JADWAL ##
+// =======================================================
+app.post('/attendances/invite', authenticateToken, async (req, res) => {
+  // Hanya Admin yang bisa mengundang
+  if (req.user.role !== 'ADMIN') {
+    return res.status(403).json({ message: 'Access denied.' });
+  }
+
+  try {
+    const { schedule_id, user_id_to_invite } = req.body;
+
+    if (!schedule_id || !user_id_to_invite) {
+      return res.status(400).json({ message: 'schedule_id and user_id_to_invite are required.' });
+    }
+
+    // 1. Buat undangan (status PENDING) di database
+    const query = `
+      INSERT INTO attendances (schedule_id, user_id, status)
+      VALUES (?, ?, 'PENDING')
+      ON DUPLICATE KEY UPDATE status = 'PENDING'
+    `;
+    await db.execute(query, [schedule_id, user_id_to_invite]);
+
+    // 2. Ambil detail user yang diundang (untuk notifikasi)
+    const [users] = await db.execute('SELECT email FROM users WHERE id = ?', [user_id_to_invite]);
+    const [schedules] = await db.execute('SELECT title, schedule_time FROM schedules WHERE id = ?', [schedule_id]);
+
+    if (users.length === 0 || schedules.length === 0) {
+      return res.status(404).json({ message: 'User or Schedule not found.' });
+    }
+
+    // 3. Kirim pesan BERTARGET ke RabbitMQ
+    const connection = await amqp.connect(process.env.RABBITMQ_URL);
+    const channel = await connection.createChannel();
+    const queue = 'schedule_notifications';
+    await channel.assertQueue(queue, { durable: true });
+
+    const message = {
+      recipientEmail: users[0].email,
+      recipientPhone: '628xxxxxxxxxx', // GANTI DENGAN NOMOR WA USER (jika Anda menyimpannya)
+      scheduleTitle: schedules[0].title,
+      scheduleTime: schedules[0].schedule_time
+    };
+
+    channel.sendToQueue(queue, Buffer.from(JSON.stringify(message)), { persistent: true });
+    console.log(`[x] Sent notification invite for schedule ${schedules[0].title} to ${users[0].email}`);
+
+    setTimeout(() => { connection.close(); }, 500);
+
+    res.status(200).json({ message: 'User invited successfully.' });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') {
+        return res.status(409).json({ message: 'User already invited.' });
+    }
+    console.error('Invite user error:', error);
+    res.status(500).json({ message: 'Internal server error.' });
   }
 });
 

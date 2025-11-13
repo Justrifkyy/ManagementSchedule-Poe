@@ -120,6 +120,26 @@ app.put("/profile", authenticateToken, async (req, res) => {
   }
 });
 
+// =======================================================
+// ## ENDPOINT BARU: AMBIL DAFTAR USER UNTUK DIUNDANG ##
+// =======================================================
+app.get('/users', authenticateToken, async (req, res) => {
+  // Pastikan hanya Admin yang bisa melihat daftar pengguna
+  if (req.user.role !== 'ADMIN') {
+    return res.status(403).json({ message: 'Access denied.' });
+  }
+
+  try {
+    // Ambil semua pengguna yang BUKAN ADMIN
+    const query = "SELECT id, username, email, role FROM users WHERE role != 'ADMIN'";
+    const [users] = await db.execute(query);
+    res.json(users);
+  } catch (error) {
+    console.error('Get users error:', error);
+    res.status(500).json({ message: 'Internal server error.' });
+  }
+});
+
 // Menjalankan server
 app.listen(PORT, () => {
   console.log(`Auth service is running on http://localhost:${PORT}`);
